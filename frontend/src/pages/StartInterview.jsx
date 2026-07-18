@@ -10,12 +10,17 @@ const StartInterview = () => {
   const [camEnabled, setCamEnabled] = useState(false);
   const videoRef = useRef(null);
 
-  // 🟢 INTERVIEW CONFIGURATION STATE
-  const [interviewType, setInterviewType] = useState('Technical (Coding & Core CS)');
-  const [targetRole, setTargetRole] = useState('Software Development Engineer');
-  const [techStack, setTechStack] = useState('C++, React, Node.js');
+  // 🟢 CATCH THE DATA FROM PRACTICE BANK HERE!
+  const initialType = location.state?.interviewType || 'Technical (Coding & Core CS)';
+  const initialRole = location.state?.targetRole || 'Software Development Engineer';
+  const initialStack = location.state?.techStack || 'C++, React, Node.js';
 
-  // 🟢 NEW: TURN ON/OFF THE WEBCAM
+  // 🟢 INTERVIEW CONFIGURATION STATE
+  const [interviewType, setInterviewType] = useState(initialType);
+  const [targetRole, setTargetRole] = useState(initialRole);
+  const [techStack, setTechStack] = useState(initialStack);
+
+  // 🟢 TURN ON/OFF THE WEBCAM
   useEffect(() => {
     let currentStream = null;
 
@@ -89,7 +94,7 @@ const StartInterview = () => {
           <div className="lg:col-span-3 flex flex-col items-center">
             <div className="w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden relative shadow-lg flex items-center justify-center border-4 border-slate-800">
               
-              {/* 🟢 NEW: THE ACTUAL VIDEO TAG */}
+              {/* THE ACTUAL VIDEO TAG */}
               <video 
                 ref={videoRef} 
                 autoPlay 
@@ -140,8 +145,11 @@ const StartInterview = () => {
                   className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-600 outline-none bg-white"
                 >
                   <option>Technical (Coding & Core CS)</option>
-                  <option>HR & Behavioral</option>
+                  <option>Data Structures</option>
+                  <option>Algorithms</option>
                   <option>System Design</option>
+                  <option>HR & Behavioral</option>
+                  <option>Frontend</option>
                 </select>
               </div>
 
@@ -156,7 +164,8 @@ const StartInterview = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Tech Stack Focus</label>
+                {/* 🟢 UPDATED LABEL TEXT */}
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tech Stack / Specific Topic</label>
                 <input 
                   type="text" 
                   value={techStack}

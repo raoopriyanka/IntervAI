@@ -79,17 +79,22 @@ async def start_interview(config: InterviewConfig, current_user: dict = Depends(
     print(f"🟡 Generating first question for role: {config.targetRole}")
     
     prompt = f"""
-    You are a strict, highly experienced Senior Engineering Manager conducting a {config.interviewType} interview.
+    You are a strict, highly experienced Technical Interviewer at a top FAANG company.
     The candidate is applying for the role of {config.targetRole}.
-    Their tech stack focus is: {config.techStack}.
+    Interview Type: {config.interviewType}.
+    Topic / Specific Question: {config.techStack}.
     
-    Generate ONE realistic, challenging interview question based on this profile.
-    Do not include any greetings, pleasantries, or extra text.
-    Output ONLY the raw question string.
+    CRITICAL INSTRUCTION:
+    If the 'Topic' provided is a specific known coding problem (e.g., 'Two Sum', '{config.techStack}', 'Design Twitter'), your FIRST question MUST be the actual problem statement. 
+    Do NOT ask them about a time they used it in the past. Ask them directly how they would solve the problem algorithmically.
+    
+    FORMATTING INSTRUCTION:
+    Format the question beautifully using Markdown. Use bold text, `code blocks` for variables, and bulleted/numbered lists for constraints or rules.
+    
+    Output ONLY the raw formatted question string. No greetings, no pleasantries.
     """
     
     try:
-        # 🟢 NEW SYNTAX for generating content
         response = client.models.generate_content(
             model=MODEL_ID,
             contents=prompt
@@ -109,21 +114,28 @@ async def submit_answer(payload: AnswerPayload, current_user: dict = Depends(ver
     print(f"🟡 Evaluating answer for user {user_id}...")
     
     prompt = f"""
-    You are a strict Senior Engineering Manager evaluating an interview answer.
+    You are a strict Senior Engineering Manager at a top FAANG company evaluating an interview answer.
     
     Interview Question: "{payload.question}"
-    Candidate's Answer: "{payload.answer}"
+    Candidate's Answer/Submission: "{payload.answer}"
     
-    Evaluate the candidate based ONLY on these criteria:
+    Evaluate the candidate based on the type of submission provided:
+    
+    IF THE SUBMISSION INCLUDES [WRITTEN CODE] AND [VERBAL EXPLANATION] (DSA/Coding Question):
+    1. Analyze the Big-O Time and Space complexity of their code. Is it the optimal approach?
+    2. Check for syntax errors, logical bugs, and unhandled edge cases.
+    3. Evaluate their verbal explanation: did they clearly articulate their algorithmic thought process?
+    
+    IF THE SUBMISSION IS PURE TEXT (Behavioral/System Design Question):
     1. Did they directly answer the specific question asked?
     2. Is their technical logic accurate and sound?
-    3. Is their communication clear and concise?
+    3. Is their communication clear, structured, and concise?
     
-    Provide a score from 0 to 100.
-    Provide 2 sentences of direct, actionable feedback.
-    Generate the NEXT interview question to ask them.
+    Provide a score from 0 to 100 based on your evaluation.
+    Provide 2 to 3 sentences of direct, actionable feedback. If they wrote code, you MUST point out specific optimizations, bugs, or compliment their time complexity.
+    Generate ONE logical NEXT interview question to ask them.
     
-    You MUST return the output strictly as a JSON object with the following schema:
+    You MUST return the output strictly as a JSON object with the exact following schema:
     {{
         "score": integer,
         "feedback": "string",
@@ -132,7 +144,6 @@ async def submit_answer(payload: AnswerPayload, current_user: dict = Depends(ver
     """
     
     try:
-        # 🟢 NEW SYNTAX: Force Gemini to return valid JSON
         response = client.models.generate_content(
             model=MODEL_ID,
             contents=prompt,
@@ -148,11 +159,11 @@ async def submit_answer(payload: AnswerPayload, current_user: dict = Depends(ver
             new_interview = InterviewSessionDB(
                 student_id=user_id,
                 college_name=college_name,
-                role_applied_for="Dynamic Active Session", 
+                role_applied_for="Technical Mock Interview", # 🟢 FIXED: No longer says Dynamic Active Session
                 difficulty="Adaptive",
                 overall_score=result.get("score", 0),
-                technical_score=result.get("score", 0), # Fallback to overall score
-                communication_score=result.get("score", 0), # Fallback to overall score
+                technical_score=result.get("score", 0),
+                communication_score=result.get("score", 0),
                 feedback=result.get("feedback", "No feedback generated."),
                 improvement_insight="Keep practicing to structure your answers better.",
                 strengths=["Attempted the question"],
@@ -187,7 +198,6 @@ async def get_feedback(current_user: dict = Depends(verify_token)):
     recent_answers = await cursor.to_list(length=5)
 
     if not recent_answers:
-        # If they haven't taken an interview yet, tell React to show an error
         return {"status": "error", "message": "No interviews found."}
 
     # 2. Reverse the list so question 1 shows first, and question 5 shows last
@@ -198,7 +208,6 @@ async def get_feedback(current_user: dict = Depends(verify_token)):
 
     # 3. Loop through the real database records and format them for React
     for idx, ans in enumerate(recent_answers):
-        # We extract your actual Question and Answer from the transcript_qa string
         transcript = ans.get("transcript_qa", "")
         parts = transcript.split("\nA: ")
         question_text = parts[0].replace("Q: ", "") if len(parts) > 0 else "Unknown Question"
@@ -215,10 +224,9 @@ async def get_feedback(current_user: dict = Depends(verify_token)):
             "score": score
         })
 
-    # 4. Calculate the overall average score for the big circle graph!
+    # 4. Calculate the overall average score for the big circle graph
     avg_score = int(total_score / len(recent_answers)) if recent_answers else 0
 
-    # 5. Return the exact JSON structure that your React FeedbackScreen expects
     return {
         "status": "success",
         "feedback": {
@@ -235,7 +243,7 @@ async def get_feedback(current_user: dict = Depends(verify_token)):
 
 
 # ==========================================
-# 🔐 AUTHENTICATION ROUTES
+# 🔐 AUTHENTICATION & HISTORY ROUTES
 # ==========================================
 
 @app.post("/register")
@@ -287,3 +295,87 @@ async def login_user(user: UserLogin):
         "name": db_user["name"],
         "role": db_user["role"]
     }
+
+@app.get("/dashboard-stats")
+async def get_dashboard_stats(current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("sub")
+    
+    # 1. Count actual questions answered directly from the database!
+    total_interviews = await db.interviews.count_documents({"student_id": user_id})
+        
+    # 2. Fetch recent interview history
+    cursor = db.interviews.find({"student_id": user_id}).sort("_id", -1).limit(10)
+    recent_docs = await cursor.to_list(length=10)
+    
+    if not recent_docs:
+        return {"status": "empty"}
+        
+    # 3. Calculate Stats
+    last_score = recent_docs[0].get("overall_score", 0)
+    avg_score = int(sum(doc.get("overall_score", 0) for doc in recent_docs) / len(recent_docs))
+    
+    # 4. Format Recent History for the UI
+    history = []
+    for idx, doc in enumerate(recent_docs[:3]): 
+        
+        # Clean up the old hardcoded titles
+        display_title = doc.get("role_applied_for", "Tech Role")
+        if display_title == "Dynamic Active Session":
+            display_title = "Technical Mock Interview"
+
+        history.append({
+            "id": str(doc["_id"]),
+            "role": display_title, 
+            "difficulty": doc.get("difficulty", "Adaptive"),
+            "score": doc.get("overall_score", 0),
+            "date": "Recent", 
+            "focus": "Core Skills"
+        })
+        
+    # 5. Format Skills Breakdown
+    skills = [
+        {"name": "Technical Depth", "score": avg_score, "color": "bg-indigo-500"},
+        {"name": "Communication", "score": min(avg_score + 8, 100), "color": "bg-emerald-500"},
+        {"name": "Confidence", "score": max(avg_score - 5, 0), "color": "bg-amber-500"}
+    ]
+    
+    return {
+        "status": "success",
+        "stats": {
+            "totalInterviews": total_interviews,
+            "averageScore": avg_score,
+            "lastScore": last_score
+        },
+        "skills": skills,
+        "history": history
+    }
+
+@app.get("/history")
+async def get_interview_history(current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("sub")
+    
+    # Fetch up to 100 past interviews, newest first
+    cursor = db.interviews.find({"student_id": user_id}).sort("_id", -1)
+    all_docs = await cursor.to_list(length=100)
+    
+    history_list = []
+    for doc in all_docs:
+        created_time = doc["_id"].generation_time.strftime("%b %d, %Y")
+        
+        transcript = doc.get("transcript_qa", "")
+        question_snippet = transcript.split("\nA: ")[0].replace("Q: ", "")[:80] + "..." if transcript else "Custom Interview"
+
+        # Clean up the old hardcoded titles
+        display_title = doc.get("role_applied_for", "Mock Interview")
+        if display_title == "Dynamic Active Session":
+            display_title = "Technical Mock Interview" 
+
+        history_list.append({
+            "id": str(doc["_id"]),
+            "role": display_title, 
+            "date": created_time,
+            "score": doc.get("overall_score", 0),
+            "snippet": question_snippet
+        })
+        
+    return {"status": "success", "history": history_list}

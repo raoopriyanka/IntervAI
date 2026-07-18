@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard';
 import StartInterview from './pages/StartInterview'; 
 import InterviewScreen from './pages/InterviewScreen';
 import FeedbackScreen from './pages/FeedbackScreen';
+import PracticeBank from './pages/PracticeBank'; // adjust path if needed
+import InterviewHistory from './pages/InterviewHistory';
 
 // ... rest of your code
 
@@ -26,6 +28,8 @@ function App() {
           <Route path="/interview/start" element={<StartInterview />} />
           <Route path="/interview/results" element={<FeedbackScreen />} />
           <Route path="/interview/active" element={<InterviewScreen />} />
+          <Route path="/practice" element={<PracticeBank />} />
+          <Route path="/history" element={<InterviewHistory />} />
         </Routes>
       </div>
     </Router>

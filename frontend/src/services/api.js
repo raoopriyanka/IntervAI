@@ -1,5 +1,5 @@
 // This is the URL where your FastAPI server is running
-const BASE_URL = 'http://127.0.0.1:8000';
+export const BASE_URL = 'http://127.0.0.1:8000';
 
 // 🟢 UTILITY: Check if the backend is online
 export const checkServerStatus = async () => {
@@ -59,24 +59,28 @@ export const logoutUser = () => {
   localStorage.removeItem("userName");
   localStorage.removeItem("userRole");
 };
-
 // 🟢 INTERVIEW: Start the interview session with custom settings
 export const startInterviewSession = async (configData) => {
   try {
     const token = localStorage.getItem("token");
     
+    // We must use POST to send the configuration body!
     const response = await fetch(`${BASE_URL}/start-interview`, { 
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json', // 🟢 NEW: Tell backend we are sending JSON
+        'Content-Type': 'application/json',
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify(configData) // 🟢 NEW: Send the role, tech stack, and difficulty!
+      body: JSON.stringify(configData) // Sends the targetRole, techStack, etc.
     });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     
     return await response.json();
   } catch (error) {
-    console.error("Failed to start interview:", error);
+    console.error("Failed to start interview. Check FastAPI terminal!", error);
     return null;
   }
 };
@@ -123,6 +127,42 @@ export const getLatestFeedback = async () => {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch feedback:", error);
+    return null;
+  }
+};
+
+// 📊 DASHBOARD: Get real user statistics
+export const getDashboardStats = async () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+
+    const response = await fetch(`${BASE_URL}/dashboard-stats`, {
+      method: 'GET',
+      headers: { 
+        "Authorization": `Bearer ${token}` 
+      }
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch dashboard stats:", error);
+    return null;
+  }
+};
+
+// 📜 HISTORY: Get all past interviews
+export const getInterviewHistory = async () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+
+    const response = await fetch(`${BASE_URL}/history`, {
+      method: 'GET',
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch history:", error);
     return null;
   }
 };

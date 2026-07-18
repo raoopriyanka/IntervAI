@@ -3,6 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { startInterviewSession, submitInterviewAnswer } from '../services/api';
 import 'regenerator-runtime/runtime'; // Required for speech recognition
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+import ReactMarkdown from 'react-markdown';
+import Editor from '@monaco-editor/react';
+import { useEyeTracking } from '../hooks/useEyeTracking';
 
 const InterviewScreen = () => {
   const navigate = useNavigate();
@@ -24,11 +27,24 @@ const InterviewScreen = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [interviewComplete, setInterviewComplete] = useState(false);
 
+  // 🟢 NEW: IDE State Management
+  const [code, setCode] = useState('// Write your code here...\n');
+  const [language, setLanguage] = useState('cpp'); // Default to C++
+  
+  // 🟢 NEW: Helper to check if we should show the IDE
+  const isCodingInterview = interviewType === 'Data Structures' || interviewType === 'Algorithms';
+
+  // 🟢 Timer State (120 seconds = 2 minutes)
+  const [timeLeft, setTimeLeft] = useState(120);
+
   // 🟢 CAMERA STATE
   const videoRef = useRef(null);
   const [cameraActive, setCameraActive] = useState(false);
 
-  // 🟢 NEW: REACT-SPEECH-RECOGNITION HOOK
+  // 🟢 NEW: INITIALIZE EYE TRACKING
+  const { isDistracted, distractionCount } = useEyeTracking(videoRef, cameraActive);
+
+  // 🟢 REACT-SPEECH-RECOGNITION HOOK
   const {
     transcript,
     listening,
@@ -36,14 +52,14 @@ const InterviewScreen = () => {
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
 
-  // 🟢 NEW: Sync the live transcript into your text area
+  // Sync the live transcript into your text area
   useEffect(() => {
     if (transcript) {
       setAnswer(transcript);
     }
   }, [transcript]);
 
-  // 🟢 INITIALIZE SESSION & CAMERA ON MOUNT
+  // 🟢 INITIALIZE SESSION ON MOUNT
   useEffect(() => {
     const initInterview = async () => {
       const token = localStorage.getItem('token');
@@ -58,44 +74,51 @@ const InterviewScreen = () => {
       if (response && response.question) {
         setCurrentQuestion(response.question);
       } else {
-        setCurrentQuestion(`As a ${targetRole} focusing on ${techStack}, tell me about a time you optimized application performance.`);
+        // If it fails, tell the user exactly what happened!
+        setCurrentQuestion(`Error: Could not connect to Nova AI. Please check your FastAPI terminal for errors.`);
       }
       
       setLoading(false);
       setIsStarted(true);
     };
 
-    // START CAMERA
+    initInterview();
+  }, [navigate, interviewType, targetRole, techStack]);
+
+  // 🟢 START CAMERA (ONLY AFTER LOADING SCREEN IS GONE)
+  useEffect(() => {
+    let stream = null;
+    
     const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setCameraActive(true);
+      if (!loading && !cameraActive && videoRef.current) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            setCameraActive(true);
+          }
+        } catch (err) {
+          console.error("Camera/Mic permission denied:", err);
         }
-      } catch (err) {
-        console.error("Camera/Mic permission denied:", err);
       }
     };
 
-    initInterview();
     startCamera();
 
     // CLEANUP CAMERA ON UNMOUNT
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [navigate, interviewType, targetRole, techStack]);
+  }, [loading, cameraActive]);
 
-// 🟢 TEXT TO SPEECH (AI VOICE)
+  // 🟢 TEXT TO SPEECH (AI VOICE)
   useEffect(() => {
     if (isStarted && currentQuestion) {
       window.speechSynthesis.cancel(); 
       
-      // 🟢 NEW: Strip out markdown characters (backticks, asterisks) just for the voice!
+      // Strip out markdown characters (backticks, asterisks) just for the voice!
       const textToSpeak = currentQuestion.replace(/[`*#_]/g, '');
       
       const utterance = new SpeechSynthesisUtterance(textToSpeak);
@@ -112,7 +135,34 @@ const InterviewScreen = () => {
     return () => window.speechSynthesis.cancel();
   }, [currentQuestion, isStarted]);
 
-  // 🟢 NEW: CLEAN TOGGLE HANDLER
+  // 🟢 Timer Countdown Logic
+  useEffect(() => {
+    // Only run the timer if the interview is active and not submitting
+    if (!isStarted || isSubmitting || interviewComplete) return;
+
+    // Stop timer at 0
+    if (timeLeft <= 0) return;
+
+    const timerId = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [timeLeft, isStarted, isSubmitting, interviewComplete]);
+
+  // 🟢 Reset Timer when a new question loads
+  useEffect(() => {
+    setTimeLeft(120); // Reset to 2 minutes
+  }, [currentQuestion]);
+
+  // 🟢 Helper to format seconds into M:SS
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  // 🟢 CLEAN TOGGLE HANDLER
   const toggleListening = () => {
     if (!browserSupportsSpeechRecognition) {
       alert("Your browser does not support Speech Recognition. Please use Chrome or Edge.");
@@ -128,17 +178,25 @@ const InterviewScreen = () => {
 
   // 🟢 SUBMIT ANSWER HANDLER
   const handleSubmitAnswer = async () => {
-    if (!answer.trim()) return;
+    // Prevent submitting if both answer and code are completely empty
+    if (!answer.trim() && (!isCodingInterview || !code.trim())) return;
     
     setIsSubmitting(true);
     if (listening) SpeechRecognition.stopListening(); 
 
     window.speechSynthesis.cancel();
 
-    const payload = { question: currentQuestion, answer: answer };
+    // 🟢 NEW: Combine Code and Speech into one smart payload for Gemini
+    let finalAnswer = answer;
+    if (isCodingInterview) {
+      finalAnswer = `[WRITTEN CODE - ${language.toUpperCase()}]\n${code}\n\n[VERBAL EXPLANATION]\n${answer}`;
+    }
+
+    const payload = { question: currentQuestion, answer: finalAnswer };
     const response = await submitInterviewAnswer(payload);
 
-    resetTranscript(); // 🟢 NEW: Clear the audio buffer for the next question
+    resetTranscript(); // Clear the audio buffer for the next question
+    if (isCodingInterview) setCode('// Write your code here...\n'); // Reset IDE
 
     if (questionCount >= 5) {
       setInterviewComplete(true);
@@ -146,7 +204,8 @@ const InterviewScreen = () => {
       if (response && response.next_question) {
         setCurrentQuestion(response.next_question);
       } else {
-        setCurrentQuestion(`How do you manage global state in a complex ${techStack} application?`);
+        // Error handling
+        setCurrentQuestion(`Error: AI failed to generate the next question. Please check backend logs.`);
       }
       setAnswer('');
       setQuestionCount(prev => prev + 1);
@@ -197,6 +256,17 @@ const InterviewScreen = () => {
         </div>
         
         <div className="flex items-center gap-6">
+          
+          {/* Timer Badge */}
+          <div className={`hidden md:flex items-center gap-2 px-4 py-2 rounded-lg border font-bold ${
+            timeLeft <= 30 
+              ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' 
+              : 'bg-slate-50 border-slate-200 text-slate-700'
+          }`}>
+            <span>⏱️</span>
+            <span className="text-lg w-12 text-center">{formatTime(timeLeft)}</span>
+          </div>
+
           <div className="hidden md:flex items-center gap-2 bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100">
             <span className="text-sm font-bold text-indigo-400">QUESTION</span>
             <span className="text-lg font-black text-indigo-700">{questionCount}<span className="text-indigo-300">/5</span></span>
@@ -229,7 +299,9 @@ const InterviewScreen = () => {
           </div>
 
           {/* USER CAMERA FEED */}
-          <div className="bg-black rounded-3xl overflow-hidden shadow-lg relative h-48 border-4 border-slate-800 shrink-0">
+          <div className={`bg-black rounded-3xl overflow-hidden shadow-lg relative h-48 border-4 shrink-0 transition-colors duration-300 ${
+            isDistracted ? 'border-red-500 shadow-red-500/50' : 'border-slate-800'
+          }`}>
             <video 
               ref={videoRef} 
               autoPlay 
@@ -237,26 +309,45 @@ const InterviewScreen = () => {
               muted 
               className="w-full h-full object-cover scale-x-[-1]" 
             ></video>
+            
+            {/* 🟢 NEW: DISTRACTION WARNING */}
+            {isDistracted && (
+              <div className="absolute inset-0 bg-red-500/20 flex flex-col items-center justify-center text-white z-20 backdrop-blur-sm">
+                <span className="text-3xl mb-1">👀</span>
+                <span className="font-bold text-sm bg-red-600 px-3 py-1 rounded-full text-center">Please look at the camera</span>
+              </div>
+            )}
+
             {!cameraActive && (
               <div className="absolute inset-0 flex items-center justify-center text-white text-sm font-medium z-10">
                 Camera formatting...
               </div>
             )}
-            {/* 🟢 UPDATED: Recording Indicator */}
+            
+            {/* Recording Indicator */}
             {listening && (
-              <div className="absolute top-4 right-4 flex items-center gap-2 bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
+              <div className="absolute top-4 right-4 flex items-center gap-2 bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 z-20">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                <span className="text-xs font-bold text-white">Recording Audio</span>
+                <span className="text-xs font-bold text-white">Recording</span>
               </div>
             )}
           </div>
 
           {/* Question Display Card */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex-1 flex flex-col justify-center overflow-y-auto">
-            <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-3">Current Question</h4>
-            <p className="text-xl font-bold text-slate-800 leading-snug">
-              "{currentQuestion}"
-            </p>
+            <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-4">Current Question</h4>
+            <div className="text-slate-800 leading-relaxed">
+              <ReactMarkdown 
+                components={{
+                  p: ({node, ...props}) => <p className="mb-4 text-lg font-bold" {...props} />,
+                  ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-4 space-y-2 font-medium text-slate-600" {...props} />,
+                  ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-4 space-y-2 font-medium text-slate-600" {...props} />,
+                  code: ({node, inline, ...props}) => <code className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono text-sm border border-indigo-100" {...props} />
+                }}
+              >
+                {currentQuestion}
+              </ReactMarkdown>
+            </div>
           </div>
         </div>
 
@@ -267,7 +358,7 @@ const InterviewScreen = () => {
               <span>✍️</span> Your Response
             </h3>
             
-            {/* 🟢 UPDATED: MICROPHONE TOGGLE BUTTON */}
+            {/* MICROPHONE TOGGLE BUTTON */}
             <button 
               onClick={toggleListening}
               className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition border ${
@@ -284,18 +375,66 @@ const InterviewScreen = () => {
             </button>
           </div>
           
-          <div className="flex-1 p-6 flex flex-col relative">
-            <textarea
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder="Type your answer here, or click 'Speak Answer' to transcribe your voice..."
-              className="flex-1 w-full resize-none outline-none text-slate-700 text-lg leading-relaxed placeholder:text-slate-300 bg-transparent relative z-10"
-              disabled={isSubmitting}
-            />
-            {/* 🟢 UPDATED: Listening Indicator */}
-            {listening && (
-              <div className="absolute bottom-6 right-6 text-sm text-indigo-400 font-medium animate-pulse">
-                Listening to you...
+          {/* 🟢 DYNAMIC RIGHT PANEL (IDE vs Textarea) */}
+          <div className="flex-1 flex flex-col relative overflow-hidden bg-slate-50/50">
+            {isCodingInterview ? (
+              <>
+                {/* IDE SECTION */}
+                <div className="flex justify-between items-center bg-slate-800 text-slate-300 px-4 py-2 text-xs font-bold uppercase tracking-wider">
+                  <span>Code Editor</span>
+                  <select 
+                    value={language} 
+                    onChange={(e) => setLanguage(e.target.value)}
+                    className="bg-slate-700 text-white border border-slate-600 rounded px-2 py-1 outline-none cursor-pointer hover:bg-slate-600 transition"
+                  >
+                    <option value="cpp">C++</option>
+                    <option value="java">Java</option>
+                    <option value="python">Python</option>
+                  </select>
+                </div>
+                <div className="h-3/5 w-full border-b-4 border-slate-200">
+                  <Editor
+                    height="100%"
+                    language={language}
+                    theme="vs-dark"
+                    value={code}
+                    onChange={(value) => setCode(value)}
+                    options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 16 } }}
+                  />
+                </div>
+
+                {/* SPOKEN EXPLANATION SECTION */}
+                <div className="h-2/5 p-6 flex flex-col relative bg-white">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Verbal Explanation</h4>
+                  <textarea
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="Click 'Speak Answer' to verbally explain your code approach..."
+                    className="flex-1 w-full resize-none outline-none text-slate-700 text-base leading-relaxed placeholder:text-slate-300 bg-transparent relative z-10"
+                    disabled={isSubmitting}
+                  />
+                  {listening && (
+                    <div className="absolute bottom-6 right-6 text-sm text-indigo-400 font-medium animate-pulse">
+                      Listening to you...
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* STANDARD TEXTAREA (For Behavioral/System Design) */
+              <div className="flex-1 p-6 flex flex-col relative bg-white">
+                <textarea
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  placeholder="Type your answer here, or click 'Speak Answer' to transcribe your voice..."
+                  className="flex-1 w-full resize-none outline-none text-slate-700 text-lg leading-relaxed placeholder:text-slate-300 bg-transparent relative z-10"
+                  disabled={isSubmitting}
+                />
+                {listening && (
+                  <div className="absolute bottom-6 right-6 text-sm text-indigo-400 font-medium animate-pulse">
+                    Listening to you...
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -308,9 +447,9 @@ const InterviewScreen = () => {
             
             <button
               onClick={handleSubmitAnswer}
-              disabled={isSubmitting || answer.trim().length === 0}
+              disabled={isSubmitting || (isCodingInterview ? (!answer.trim() && !code.trim()) : !answer.trim())}
               className={`px-8 py-4 rounded-xl font-bold text-white flex items-center gap-3 transition-all ${
-                isSubmitting || answer.trim().length === 0 
+                isSubmitting || (isCodingInterview ? (!answer.trim() && !code.trim()) : !answer.trim())
                   ? 'bg-slate-300 cursor-not-allowed' 
                   : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 hover:-translate-y-0.5'
               }`}

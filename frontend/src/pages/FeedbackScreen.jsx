@@ -1,194 +1,176 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getLatestFeedback } from '../services/api';
+import ReactMarkdown from 'react-markdown';
+import { BASE_URL } from '../services/api'; // 🟢 NEW: Import your dynamic base URL
 
 const FeedbackScreen = () => {
   const navigate = useNavigate();
+  const [feedbackData, setFeedbackData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState(null);
 
   useEffect(() => {
-    const fetchFeedback = async () => {
-      // Attempt to fetch real data from your backend
-      const data = await getLatestFeedback();
-      
-      if (data && data.status === "success") {
-        setFeedback(data.feedback);
-      } else {
-        // 🟢 MOCK DATA FALLBACK: So you can see the UI while testing
-        setFeedback({
-          overallScore: 82,
-          summary: "You demonstrated a strong understanding of core concepts, particularly in React and state management. However, your explanations could be more structured. Try using the STAR method (Situation, Task, Action, Result) for behavioral questions.",
-          metrics: [
-            { name: "Technical Accuracy", score: 90, color: "bg-emerald-500", text: "text-emerald-600" },
-            { name: "Communication", score: 75, color: "bg-amber-500", text: "text-amber-600" },
-            { name: "Confidence & Delivery", score: 80, color: "bg-indigo-500", text: "text-indigo-600" }
-          ],
-          qna: [
-            {
-              id: 1,
-              question: "Tell me about a time you had to optimize the performance of a React application.",
-              userAnswer: "I used React.memo to stop components from re-rendering and lazy loaded images.",
-              aiFeedback: "Good start, but you missed explaining *why* the app was slow in the first place. Next time, mention how you profiled the app using React DevTools before applying fixes.",
-              score: 70
-            },
-            {
-              id: 2,
-              question: "How do you manage global state in a complex frontend application?",
-              userAnswer: "I usually prefer Redux Toolkit because it cuts down boilerplate, but sometimes I just use Context API if the app is small and doesn't update too often.",
-              aiFeedback: "Excellent answer. You showed that you understand the trade-offs between different tools rather than just picking one blindly. Very senior-level mindset.",
-              score: 95
-            }
-          ]
+    const fetchRealResults = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        // 🟢 FIXED: Using dynamic BASE_URL for future deployment!
+        const response = await fetch(`${BASE_URL}/get-feedback`, {
+          headers: { "Authorization": `Bearer ${token}` }
         });
+        const data = await response.json();
+        
+        if (data.status === "success") {
+          setFeedbackData(data.feedback);
+        }
+      } catch (error) {
+        console.error("Failed to load feedback", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    fetchFeedback();
+    fetchRealResults();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
-        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-        <h2 className="text-xl font-bold text-slate-700">Generating Nova AI Analysis...</h2>
-      </div>
-    );
-  }
+  const renderUserAnswer = (rawAnswer) => {
+    if (rawAnswer.includes('[WRITTEN CODE -')) {
+      const parts = rawAnswer.split('[VERBAL EXPLANATION]');
+      const codePart = parts[0].replace(/\[WRITTEN CODE - .*?\]\n/, '').trim();
+      const verbalPart = parts[1] ? parts[1].trim() : 'No verbal explanation provided.';
+      
+      const langMatch = rawAnswer.match(/\[WRITTEN CODE - (.*?)\]/);
+      const lang = langMatch ? langMatch[1] : 'CODE';
 
-  if (!feedback) return <div className="p-8 text-center text-red-500">Failed to load feedback.</div>;
+      return (
+        <div className="flex flex-col gap-4 mt-2">
+          <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-inner">
+            <div className="bg-slate-800 px-4 py-1.5 border-b border-slate-700 text-xs font-bold text-slate-400">
+              {lang}
+            </div>
+            <pre className="p-4 overflow-x-auto text-sm font-mono text-emerald-400 leading-relaxed">
+              <code>{codePart}</code>
+            </pre>
+          </div>
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1 block">🎤 Transcript</span>
+            <p className="text-slate-700 italic">"{verbalPart}"</p>
+          </div>
+        </div>
+      );
+    }
+    return <p className="text-slate-700 text-lg leading-relaxed mt-2">"{rawAnswer}"</p>;
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+      <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+      <h2 className="text-xl font-bold text-slate-700">Analyzing Your Performance...</h2>
+    </div>
+  );
+
+  if (!feedbackData) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <h2 className="text-xl font-bold text-red-500">Failed to load feedback.</h2>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-12">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
       
-      {/* 🟢 HEADER */}
-      <header className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-black text-indigo-600 tracking-tight">IntervAI.</h1>
-          <span className="h-6 w-px bg-slate-200 hidden md:block"></span>
-          <h2 className="text-lg font-bold text-slate-700 hidden md:block">Interview Results</h2>
-        </div>
-        <button 
-          onClick={() => navigate('/dashboard')}
-          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition"
-        >
-          Back to Dashboard
-        </button>
-      </header>
-
-      <main className="max-w-5xl mx-auto p-6 md:p-8 mt-4 space-y-8">
-        
-        {/* 🟢 TOP SECTION: SCORE & SUMMARY */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      {/* Header */}
+      <header className="bg-indigo-600 text-white pt-16 pb-24 px-6 md:px-12">
+        <div className="max-w-5xl mx-auto">
+          <button onClick={() => navigate('/dashboard')} className="text-indigo-200 hover:text-white flex items-center gap-2 mb-8 transition font-bold text-sm">
+            <span>←</span> Back to Dashboard
+          </button>
           
-          {/* Overall Score Card */}
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center col-span-1">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">Overall Score</h3>
-            
-            {/* Cool CSS Circle */}
-            <div className="relative w-40 h-40 flex items-center justify-center rounded-full bg-slate-50 mb-6 shadow-inner border-8 border-slate-100">
-              {/* Dynamic colored ring based on score */}
-              <svg className="absolute inset-0 w-full h-full transform -rotate-90">
-                <circle cx="80" cy="80" r="72" fill="none" className="stroke-slate-100" strokeWidth="8" />
-                <circle cx="80" cy="80" r="72" fill="none" 
-                  className={feedback.overallScore >= 80 ? 'stroke-emerald-500' : feedback.overallScore >= 60 ? 'stroke-amber-500' : 'stroke-red-500'} 
-                  strokeWidth="8" 
-                  strokeDasharray={`${(feedback.overallScore / 100) * 452} 452`} 
-                  strokeLinecap="round" 
-                  style={{ transition: 'stroke-dasharray 1s ease-out' }}
-                />
-              </svg>
-              <div className="relative z-10 flex flex-col items-center">
-                <span className="text-5xl font-black text-slate-800">{feedback.overallScore}</span>
-                <span className="text-sm font-bold text-slate-400">/ 100</span>
-              </div>
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
+            <div>
+              <h1 className="text-4xl md:text-5xl font-black tracking-tight mb-2">Interview Results</h1>
+              <p className="text-indigo-200 text-lg max-w-xl leading-relaxed">{feedbackData.summary}</p>
             </div>
-            
-            <p className="font-bold text-slate-700">
-              {feedback.overallScore >= 80 ? "🔥 Outstanding performance!" : feedback.overallScore >= 60 ? "👍 Good effort, room to grow." : "💪 Keep practicing!"}
-            </p>
+            <div className="bg-white/10 backdrop-blur-md border border-white/20 p-6 rounded-3xl text-center min-w-[180px] shadow-xl">
+              <span className="block text-indigo-200 text-sm font-bold uppercase tracking-wider mb-1">Overall Score</span>
+              <span className="text-6xl font-black text-white">{feedbackData.overallScore}</span>
+            </div>
           </div>
 
-          {/* AI Summary & Metrics */}
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm col-span-1 md:col-span-2 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">🧠</span>
-                <h3 className="text-xl font-bold text-slate-800">Nova AI's Final Assessment</h3>
-              </div>
-              <p className="text-slate-600 leading-relaxed mb-8">
-                {feedback.summary}
-              </p>
-            </div>
-
-            {/* Metric Bars */}
-            <div className="space-y-5">
-              {feedback.metrics.map((metric, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between text-sm font-bold text-slate-700 mb-2">
-                    <span>{metric.name}</span>
-                    <span className={metric.text}>{metric.score}%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                    <div className={`${metric.color} h-3 rounded-full`} style={{ width: `${metric.score}%` }}></div>
+          {/* 🟢 NEW: Skills Breakdown row using the Backend Data! */}
+          {feedbackData.metrics && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-indigo-500/50 pt-8">
+              {feedbackData.metrics.map((metric, idx) => (
+                <div key={idx} className="bg-indigo-700/50 rounded-2xl p-4 flex items-center justify-between border border-indigo-500/30">
+                  <span className="font-bold text-indigo-100">{metric.name}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24 h-2 bg-indigo-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${metric.color || 'bg-emerald-400'}`} style={{ width: `${metric.score}%` }}></div>
+                    </div>
+                    <span className="font-black text-white w-8 text-right">{metric.score}</span>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* 🟢 DETAILED Q&A BREAKDOWN */}
-        <div className="space-y-6">
-          <h3 className="text-2xl font-bold text-slate-800 pl-2">Question Breakdown</h3>
-          
-          {feedback.qna.map((item, index) => (
-            <div key={item.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-5xl mx-auto px-6 md:px-12 -mt-10">
+        <h3 className="text-2xl font-black text-slate-800 mb-6 mt-12">Question Breakdown</h3>
+        <div className="space-y-8">
+          {feedbackData.qna.map((item, index) => (
+            <div key={item.id} className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
               
               {/* Question Header */}
-              <div className="p-6 bg-slate-50 border-b border-slate-100 flex gap-4 items-start">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-black flex items-center justify-center shrink-0">
-                  {index + 1}
+              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-8">
+                <div className="flex items-start gap-4">
+                  <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold shrink-0 mt-1">
+                    {index + 1}
+                  </span>
+                  <div className="text-xl font-bold text-slate-800 leading-snug">
+                    <ReactMarkdown 
+                      components={{
+                        p: ({node, ...props}) => <p className="mb-2" {...props} />,
+                        code: ({node, inline, ...props}) => <code className="bg-indigo-50 text-indigo-600 px-1 py-0.5 rounded font-mono text-sm" {...props} />
+                      }}
+                    >
+                      {item.question}
+                    </ReactMarkdown>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-lg font-bold text-slate-800">{item.question}</h4>
-                </div>
-                <div className={`ml-auto px-3 py-1 rounded-lg text-sm font-bold shrink-0 ${
-                  item.score >= 80 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                <div className={`px-4 py-2 rounded-xl font-bold text-sm shrink-0 flex items-center justify-center ${
+                  item.score >= 90 ? 'bg-emerald-100 text-emerald-700' : 
+                  item.score >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
                 }`}>
                   {item.score}/100
                 </div>
               </div>
 
-              {/* Answers & Feedback */}
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Answers & Feedback Grid */}
+              <div className="grid md:grid-cols-2 gap-6">
                 
-                {/* User Answer */}
-                <div>
-                  <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                {/* Parsed User Answer */}
+                <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2 mb-4">
                     <span>🗣️</span> Your Answer
-                  </h5>
-                  <div className="bg-slate-50 p-4 rounded-xl text-slate-700 text-sm leading-relaxed border border-slate-100">
-                    "{item.userAnswer}"
-                  </div>
+                  </h4>
+                  {renderUserAnswer(item.userAnswer)}
                 </div>
 
                 {/* AI Feedback */}
-                <div>
-                  <h5 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100">
+                  <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-2 mb-4">
                     <span>💡</span> AI Feedback
-                  </h5>
-                  <div className="bg-indigo-50/50 p-4 rounded-xl text-indigo-900 text-sm leading-relaxed border border-indigo-100">
+                  </h4>
+                  <p className="text-indigo-900 leading-relaxed font-medium">
                     {item.aiFeedback}
-                  </div>
+                  </p>
                 </div>
-
+                
               </div>
             </div>
           ))}
         </div>
-
       </main>
     </div>
   );
